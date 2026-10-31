@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>Rota com OpenRouteService</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- CSS Oficial do plugin para o controle não quebrar -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.offline@3.2.1/dist/leaflet.offline.css" />
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/idb@7/build/umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.offline@3.2.1/dist/bundle.js"></script>
+    <script src="javascript/libJData/jdata.js"></script>
+    
+    <style>
+        html, body { margin: 0; padding: 0; height: 100%; }
+        #map { height: 100vh; width: 100%; }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 50px;
+            z-index: 1000;
+            background: white;
+            padding: 10px 15px;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            font-family: sans-serif;
+            font-size: 14px;
+        }
+        .pref-coords{
+            display: flex;
+            flex-direction: row;
+            justify-content: flex-start;
+            flex-wrap: wrap;
+            padding: 10px;
+        }
+        .pref-coords way-points{
+            padding: 5px;
+            margin-left: 10px;
+            margin-right: 10px;
+        }
+            
+        .pref-coords way-points div{
+            align-items: center;
+            text-align: center;
+        }
+        .btn{
+            padding: 15px;
+            margin-right: 5px;
+            display: flex;
+            flex-direction: row;
+        }
+        .btn button{
+            margin-left: 5px;
+            margin-right: 5px;
+            width: 100px;
+            background-color: blue;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="pref-coords">
+        <div class="way-points">
+            <div>
+                <label>Coordenada inicial</label><br>
+                <input id="name0" type="text"/>
+            </div>
+            <div>
+                <label>Coordenadas</label><br>
+                <input id="coord0" type="text"/>
+            </div>
+        </div>
+        <div class="way-points">
+            <div>
+                <label for="name">Nome</label><br>
+                <input id="name1" type="text"/>
+            </div>
+            <div>
+                <label for="name">Coordenadas</label><br>
+                <input id="coord1" type="text"/>
+            </div>
+        </div>
+    </div>
+    <div class="btn">
+        <button id="add-way-points">Traçar Rota</button>
+        <button id="trace-route">Traçar Rota</button>
+    </div>
+    
+    <div id="map">
+        <div id="info">Calculando rota...</div>
+    </div>
+    
+    <script>
+        // ====== CONFIG ======
+        let key;
+        let count = 1;
+        let coords = [];
+        const ORS_URL = 'https://api.heigit.org/openrouteservice/v2/directions/driving-car/geojson';
+
+         startCoord = [-3.8575446, -40.9250892];
+        // ====== LOAD CONFIG AND TRACE ROUTE ======
+        (async function () {
+            try {
+                const r = await fetch('storage/conf.jdata');
+                if (!r.ok) throw new Error('Falha ao carregar conf');
+
+                const texto = await r.text();
+                const conf = JData.parse(texto);
+                /* chamar coordenadas do conf
+                let s = [];
+                s.push(conf["Conf"].coordLat);
+                s.push(conf["Conf"].coordLng);
+                startCoord = s
+                console.log(s);
+                */
+                key = conf["Conf"].key;
+            } catch (erro) {
+                console.error('Erro:', erro);
+                document.getElementById('info').textContent = 'Erro ao carregar configuração.';
+            }
+        })();
+
+        // ====== BASE LAYERS ======
+        const osmLayer = L.tileLayer.offline(
+            'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            {
+                attribution: '© OpenStreetMap contributors',
+                subdomains: 'abc',
+                crossOrigin: true,
+                maxZoom: 19
+            }
+        );
+
+        const terrainLayer = L.tileLayer.offline(
+            'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+            {
+                attribution: 'Tiles © Esri — Source: Esri, USGS, NOAA',
+                maxZoom: 19,
+                crossOrigin: true,
+                maxNativeZoom: 16
+            }
+        );
+
+        const satelliteLayer = L.tileLayer.offline(
+            'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            {
+                attribution: 'Tiles © Esri',
+                maxZoom: 19,
+                crossOrigin: true,
+                maxNativeZoom: 16
+            }
+        );
+
+        const layers = {
+            osm: osmLayer,
+            terrain: terrainLayer,
+            satellite: satelliteLayer
+        };
+
+        // ====== RESTORE SAVED LAYER ======
+        const savedLayer = localStorage.getItem('baseLayer') || 'osm';
+        const initialLayer = layers[savedLayer] || osmLayer;
+
+        // ====== INIT MAP ======
+        const map = L.map('map', {
+            center: startCoord,
+            zoom: 14,
+            layers: [initialLayer]
+        });
+
+        // ====== LAYER CONTROL ======
+        L.control.layers(
+            {
+                'Ruas (OSM)': osmLayer,
+                'Terreno (Esri Topo)': terrainLayer,
+                'Satélite (Esri)': satelliteLayer
+            },
+            null,
+            { position: 'topright', collapsed: false }
+        ).addTo(map);
+        
+        // ====== SALVAR MAPA OFFLINE ======
+        // Apenas o zoom 16 para não lotar o navegador
+        const saveControl = L.control.savetiles(osmLayer, {
+            zoomlevels: [16], 
+            position: 'topleft', 
+            saveText: '💾',
+            rmText: '🗑️'
+        });
+        saveControl.addTo(map);
+
+        // ====== SAVE LAYER ON CHANGE ======
+        map.on('baselayerchange', function (e) {
+            const name = Object.keys(layers).find(k => layers[k] === e.layer);
+            if (name) {
+                localStorage.setItem('baseLayer', name);
+                console.log('Camada salva:', name);
+                
+                // Atualiza o botão de salvar para apontar para a camada ativa!
+                saveControl.setLayer(e.layer);
+            }
+        });
+
+        // Monitorar progresso do download no console
+        osmLayer.on('savestart', function(e) {
+            console.log('Iniciando download de', e.lengthToBeSaved, 'tiles');
+            document.getElementById('info').textContent = 'Baixando mapa offline...';
+        });
+        osmLayer.on('saveend', function(e) {
+            console.log('Download finalizado. Tiles salvos:', e.lengthSaved);
+            document.getElementById('info').textContent = 'Mapa salvo para uso offline!';
+        });
+
+        document.getElementById("trace-route").addEventListener("click",  () => {
+            coords = [];
+            for(i=0; i <= count; i++){
+                currentCoord = document.getElementById("coord"+i).value;
+                let arryCurrentCoords = currentCoord.split(",").map(c => c.trim());
+                arryCurrentCoords.push([currentCoord[0]]);
+                arryCurrentCoords.push([currentCoord[1]])
+                coords.push([arryCurrentCoords]);
+                console.log(coords);
+                traceRoute(key, coords);
+            }
+        });
+
+        // ====== TRACE ROUTE ======
+        async function traceRoute(key, coords) {
+            const infoDiv = document.getElementById('info');
+            
+            if (!key) {
+                infoDiv.textContent = 'API Key não encontrada.';
+                return;
+            }
+
+            const orsCoords = coords.map(c => [c[1], c[0]]);
+            const cacheKey = 'route_' + JSON.stringify(orsCoords);
+
+            try {
+                const cached = localStorage.getItem(cacheKey);
+                let data;
+
+                if (cached) {
+                    console.log('Rota carregada do cache');
+                    data = JSON.parse(cached);
+                } else {
+                    const resp = await fetch(ORS_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': key,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            coordinates: orsCoords,
+                            instructions: false
+                        })
+                    });
+
+                    if (!resp.ok) {
+                        const err = await resp.text();
+                        console.error('Erro ORS:', resp.status, err);
+                        infoDiv.textContent = `Erro ao calcular rota (${resp.status}).`;
+                        return;
+                    }
+
+                    data = await resp.json();
+                    try {
+                        localStorage.setItem(cacheKey, JSON.stringify(data));
+                    } catch (e) {
+                        console.warn('Não foi possível salvar a rota no cache:', e);
+                    }
+                }
+
+                const routeLayer = L.geoJSON(data, {
+                    style: { color: '#2c7be5', weight: 6, opacity: 0.85 }
+                }).addTo(map);
+
+                coords.forEach((c, i) => {
+                    L.marker(c)
+                        .addTo(map)
+                        .bindPopup(`<b>Ponto ${i + 1}</b><br>Lat: ${c[0]}<br>Lng: ${c[1]}`);
+                });
+
+                map.fitBounds(routeLayer.getBounds(), { padding: [30, 30] });
+
+                const summary = data.features[0].properties.summary;
+                const distKm = (summary.distance / 1000).toFixed(2);
+                const durMin = Math.round(summary.duration / 60);
+                infoDiv.innerHTML = `<b>Rota calculada</b><br>Distância: ${distKm} km<br>Duração: ${durMin} min`;
+
+            } catch (e) {
+                console.error('Erro na requisição:', e);
+                infoDiv.textContent = 'Erro de conexão com o serviço de rotas.';
+            }
+        }
+    </script>
+</body>
+</html>
