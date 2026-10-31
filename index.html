@@ -1,19 +1,27 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-br">
 <head>
-    <meta charset="utf-8" />
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rota com OpenRouteService</title>
+    <link rel="icon" href="data:,">
+    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <!-- CSS Oficial do plugin para o controle não quebrar -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.offline@3.2.1/dist/leaflet.offline.css" />
+    
+    <!-- CSS do plugin Fullscreen -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.fullscreen@3.0.0/Control.FullScreen.css" />
     
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/idb@7/build/umd.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/leaflet.offline@3.2.1/dist/bundle.js"></script>
+    <!-- JS do plugin Fullscreen -->
+    <script src="https://unpkg.com/leaflet.fullscreen@3.0.0/Control.FullScreen.js"></script>
     <script src="javascript/libJData/jdata.js"></script>
     
     <style>
-        html, body { margin: 0; padding: 0; height: 100%; }
+        html, body { margin: 0; padding: 0;}
         #map { height: 100vh; width: 100%; }
         #info {
             position: absolute;
@@ -30,41 +38,152 @@
         .pref-coords{
             display: flex;
             flex-direction: row;
-            justify-content: flex-start;
             flex-wrap: wrap;
             padding: 10px;
+            width: 100%;
         }
-        .pref-coords way-points{
+        .way-points{
             padding: 5px;
             margin-left: 10px;
             margin-right: 10px;
+            
         }
             
-        .pref-coords way-points div{
+        .way-points div{
             align-items: center;
             text-align: center;
+            
+        }
+          
+        .way-points div input{
+            align-items: center;
+            text-align: center;
+            border: 2px black solid;
         }
         .btn{
             padding: 15px;
             margin-right: 5px;
             display: flex;
             flex-direction: row;
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
         }
         .btn button{
             margin-left: 5px;
             margin-right: 5px;
-            width: 100px;
+            width: 120px;
             background-color: blue;
             color: white;
+        }
+
+        .leaflet-control{
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            min-width: 34px;
+            align-items: center;
+        }
+
+        .history-btn {
+            background: white;
+            border: 2px solid rgba(0,0,0,0.2);
+            background-clip: padding-box;
+            border-radius: 4px;
+            width: 34px;
+            height: 34px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 18px;
+            cursor: pointer;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+        }
+        .history-btn:hover { background-color: #f4f4f4; }
+        
+        .history-panel {
+            position: absolute;
+            top: 60px;
+            left: 10px;
+            background: white;
+            border: 2px solid rgba(0,0,0,0.2);
+            background-clip: padding-box;
+            border-radius: 4px;
+            width: 280px;
+            max-height: 400px;
+            overflow-y: auto;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+            display: none;
+            z-index: 1000;
+            font-family: sans-serif;
+            font-size: 13px;
+        }
+        .history-panel.active { display: block; }
+        .history-header {
+            background: #f8f9fa;
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+        }
+        .history-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .history-item:hover { background-color: #f0f8ff; }
+        
+        .history-item-content {
+            flex: 1;
+            overflow: hidden;
+        }
+        .history-item-route {
+            font-size: 11px;
+            color: #666;
+            margin-top: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .delete-route-btn {
+            background: #ff4d4d;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 5px 8px;
+            margin-left: 10px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .delete-route-btn:hover {
+            background: #cc0000;
+        }
+
+        @media (max-width: 520px) {
+            .way-points{
+            padding: 5px;
+            margin-left: 5px;
+            margin-right: 5px;
+        }
+            
+        .way-points div{
+            align-items: center;
+            text-align: center;
+        }
         }
     </style>
 </head>
 <body>
-    <div class="pref-coords">
-        <div class="way-points">
+    <div class="pref-coords" id="pref-coords">
+        <div class="way-points" >
             <div>
                 <label>Coordenada inicial</label><br>
-                <input id="name0" type="text"/>
+                <input id="name0" type="text" value="INICIO"/>
             </div>
             <div>
                 <label>Coordenadas</label><br>
@@ -83,7 +202,7 @@
         </div>
     </div>
     <div class="btn">
-        <button id="add-way-points">Traçar Rota</button>
+        <button id="add-way-points">Adicionar Ponto</button>
         <button id="trace-route">Traçar Rota</button>
     </div>
     
@@ -95,25 +214,21 @@
         // ====== CONFIG ======
         let key;
         let count = 1;
+        let namePoints = [];
         let coords = [];
+        let currentRouteLayer = null;
+        let currentMarkers = [];
         const ORS_URL = 'https://api.heigit.org/openrouteservice/v2/directions/driving-car/geojson';
 
-         startCoord = [-3.8575446, -40.9250892];
-        // ====== LOAD CONFIG AND TRACE ROUTE ======
+        let startCoord = [-3.8575446, -40.9250892];
+        
+        // ====== LOAD CONFIG ======
         (async function () {
             try {
                 const r = await fetch('storage/conf.jdata');
                 if (!r.ok) throw new Error('Falha ao carregar conf');
-
                 const texto = await r.text();
                 const conf = JData.parse(texto);
-                /* chamar coordenadas do conf
-                let s = [];
-                s.push(conf["Conf"].coordLat);
-                s.push(conf["Conf"].coordLng);
-                startCoord = s
-                console.log(s);
-                */
                 key = conf["Conf"].key;
             } catch (erro) {
                 console.error('Erro:', erro);
@@ -124,175 +239,285 @@
         // ====== BASE LAYERS ======
         const osmLayer = L.tileLayer.offline(
             'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            {
-                attribution: '© OpenStreetMap contributors',
-                subdomains: 'abc',
-                crossOrigin: true,
-                maxZoom: 19
-            }
+            { attribution: '© OpenStreetMap contributors', subdomains: 'abc', crossOrigin: true, maxZoom: 19 }
         );
-
         const terrainLayer = L.tileLayer.offline(
             'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
-            {
-                attribution: 'Tiles © Esri — Source: Esri, USGS, NOAA',
-                maxZoom: 19,
-                crossOrigin: true,
-                maxNativeZoom: 16
-            }
+            { attribution: 'Tiles © Esri', maxZoom: 19, crossOrigin: true, maxNativeZoom: 16 }
         );
-
         const satelliteLayer = L.tileLayer.offline(
             'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            {
-                attribution: 'Tiles © Esri',
-                maxZoom: 19,
-                crossOrigin: true,
-                maxNativeZoom: 16
-            }
+            { attribution: 'Tiles © Esri', maxZoom: 19, crossOrigin: true, maxNativeZoom: 16 }
         );
 
-        const layers = {
-            osm: osmLayer,
-            terrain: terrainLayer,
-            satellite: satelliteLayer
-        };
+        const layers = { osm: osmLayer, terrain: terrainLayer, satellite: satelliteLayer };
 
         // ====== RESTORE SAVED LAYER ======
         const savedLayer = localStorage.getItem('baseLayer') || 'osm';
         const initialLayer = layers[savedLayer] || osmLayer;
 
         // ====== INIT MAP ======
-        const map = L.map('map', {
-            center: startCoord,
-            zoom: 14,
-            layers: [initialLayer]
-        });
+        const map = L.map('map', { center: startCoord, zoom: 14, layers: [initialLayer] });
+        document.getElementById('info').textContent = 'Insira a rota...';
+
+        // ====== FULLSCREEN CONTROL ======
+        L.control.fullscreen({
+            position: 'topleft',
+            title: 'Tela Cheia',
+            titleCancel: 'Sair da Tela Cheia',
+            forceSeparateButton: true,
+            forcePseudoFullscreen: true // Garante compatibilidade no iPhone
+        }).addTo(map);
 
         // ====== LAYER CONTROL ======
         L.control.layers(
-            {
-                'Ruas (OSM)': osmLayer,
-                'Terreno (Esri Topo)': terrainLayer,
-                'Satélite (Esri)': satelliteLayer
-            },
-            null,
-            { position: 'topright', collapsed: false }
+            { 'Ruas (OSM)': osmLayer, 'Terreno (Esri Topo)': terrainLayer, 'Satélite (Esri)': satelliteLayer },
+            null, { position: 'topright', collapsed: false }
         ).addTo(map);
         
-        // ====== SALVAR MAPA OFFLINE ======
-        // Apenas o zoom 16 para não lotar o navegador
+        // ====== SAVE MAP OFFLINE ======
         const saveControl = L.control.savetiles(osmLayer, {
-            zoomlevels: [16], 
-            position: 'topleft', 
-            saveText: '💾',
-            rmText: '🗑️'
+            zoomlevels: [16], position: 'topleft', saveText: '💾', rmText: '🗑️'
         });
         saveControl.addTo(map);
+
+        // ====== CUSTOM CONTROL: SAVED ROUTES BUTTON ======
+        L.Control.RoutesHistory = L.Control.extend({
+            options: { position: 'topleft' },
+            onAdd: function (map) {
+                const container = L.DomUtil.create('div', 'leaflet-bar');
+                const btn = L.DomUtil.create('a', 'history-btn', container);
+                btn.innerHTML = '📋';
+                btn.href = '#';
+                btn.title = 'Rotas Salvas';
+
+                const panel = L.DomUtil.create('div', 'history-panel');
+                document.body.appendChild(panel);
+
+                L.DomEvent.on(btn, 'click', function (e) {
+                    L.DomEvent.stopPropagation(e);
+                    L.DomEvent.preventDefault(e);
+                    if (panel.classList.contains('active')) {
+                        panel.classList.remove('active');
+                    } else {
+                        panel.classList.add('active');
+                        loadSavedRoutes(panel);
+                    }
+                });
+                return container;
+            }
+        });
+        map.addControl(new L.Control.RoutesHistory());
+
+        // ====== FUNCTION TO LIST SAVED ROUTES ======
+        function loadSavedRoutes(panel) {
+            panel.innerHTML = '<div class="history-header">Rotas Salvas <span style="cursor:pointer" onclick="this.parentElement.parentElement.classList.remove(\'active\')">✖</span></div>';
+            
+            let foundRoutes = 0;
+            
+            for (let i = 0; i < localStorage.length; i++) {
+                const storageKey = localStorage.key(i);
+                
+                if (storageKey.startsWith('route_')) {
+                    foundRoutes++;
+                    
+                    const savedData = JSON.parse(localStorage.getItem(storageKey));
+                    const visualCoords = savedData.coords.map(c => `[${c[0].toFixed(4)}, ${c[1].toFixed(4)}]`).join(' ➔ ');
+                    
+                    const item = document.createElement('div');
+                    item.className = 'history-item';
+                    
+                    const itemContent = document.createElement('div');
+                    itemContent.className = 'history-item-content';
+                    itemContent.innerHTML = `
+                        <b>Rota ${foundRoutes}</b><br>
+                        <div class="history-item-route" title="${visualCoords}">${visualCoords}</div>
+                    `;
+                    
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'delete-route-btn';
+                    deleteBtn.innerHTML = '🗑️';
+                    deleteBtn.title = 'Excluir Rota';
+                    
+                    deleteBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        if (confirm('Tem certeza que deseja apagar esta rota?')) {
+                            localStorage.removeItem(storageKey);
+                            
+                            if (currentRouteLayer) {
+                                map.removeLayer(currentRouteLayer);
+                                currentMarkers.forEach(m => map.removeLayer(m));
+                                currentRouteLayer = null;
+                                currentMarkers = [];
+                                document.getElementById('info').textContent = 'Rota removida.';
+                            }
+                            
+                            loadSavedRoutes(panel);
+                        }
+                    };
+
+                    itemContent.onclick = () => {
+                        const routeData = JSON.parse(localStorage.getItem(storageKey));
+                        if (routeData) {
+                            namePoints = routeData.names || [];
+                            drawRoute(routeData.data, routeData.coords);
+                            panel.classList.remove('active');
+                        }
+                    };
+                    
+                    item.appendChild(itemContent);
+                    item.appendChild(deleteBtn);
+                    panel.appendChild(item);
+                }
+            }
+
+            if (foundRoutes === 0) {
+                panel.innerHTML += '<div style="padding: 15px; text-align: center; color: #888;">Nenhuma rota salva ainda.</div>';
+            }
+        }
 
         // ====== SAVE LAYER ON CHANGE ======
         map.on('baselayerchange', function (e) {
             const name = Object.keys(layers).find(k => layers[k] === e.layer);
             if (name) {
                 localStorage.setItem('baseLayer', name);
-                console.log('Camada salva:', name);
-                
-                // Atualiza o botão de salvar para apontar para a camada ativa!
                 saveControl.setLayer(e.layer);
             }
         });
 
-        // Monitorar progresso do download no console
-        osmLayer.on('savestart', function(e) {
-            console.log('Iniciando download de', e.lengthToBeSaved, 'tiles');
-            document.getElementById('info').textContent = 'Baixando mapa offline...';
-        });
-        osmLayer.on('saveend', function(e) {
-            console.log('Download finalizado. Tiles salvos:', e.lengthSaved);
-            document.getElementById('info').textContent = 'Mapa salvo para uso offline!';
+        osmLayer.on('savestart', function(e) { document.getElementById('info').textContent = 'Baixando mapa offline...'; });
+        osmLayer.on('saveend', function(e) { document.getElementById('info').textContent = 'Mapa salvo para uso offline!'; });
+
+        // ====== EVENT LISTENERS ======
+        document.getElementById("add-way-points").addEventListener("click", () => {
+            count++;
+            const wayPointDiv = document.createElement('div');
+            wayPointDiv.className = 'way-points';
+            wayPointDiv.innerHTML = `
+                <div>
+                    <label for="name${count}">Nome</label><br>
+                    <input id="name${count}" type="text"/>
+                </div>
+                <div>
+                    <label for="coord${count}">Coordenadas</label><br>
+                    <input id="coord${count}" type="text"/>
+                </div>
+            `;
+            document.getElementById("pref-coords").appendChild(wayPointDiv);
         });
 
-        document.getElementById("trace-route").addEventListener("click",  () => {
+        document.getElementById("trace-route").addEventListener("click", () => {
             coords = [];
-            for(i=0; i <= count; i++){
-                currentCoord = document.getElementById("coord"+i).value;
-                let arryCurrentCoords = currentCoord.split(",").map(c => c.trim());
-                arryCurrentCoords.push([currentCoord[0]]);
-                arryCurrentCoords.push([currentCoord[1]])
-                coords.push([arryCurrentCoords]);
-                console.log(coords);
+            namePoints = []; 
+            
+            for(let i=0; i <= count; i++){
+                const inputVal = document.getElementById("coord"+i).value;
+                const inputName = document.getElementById("name"+i).value;
+                if (inputVal.trim() !== "") {
+                    let arryCurrentCoords = inputVal.split(",").map(c => Number(c.trim()));
+                    if (arryCurrentCoords.length === 2 && !isNaN(arryCurrentCoords[0]) && !isNaN(arryCurrentCoords[1])) {
+                        coords.push([arryCurrentCoords[0], arryCurrentCoords[1]]);
+                        namePoints.push(inputName || "Sem nome"); 
+                    }
+                }
+            }
+            
+            if (coords.length >= 2) {
                 traceRoute(key, coords);
+            } else {
+                document.getElementById('info').textContent = 'Insira pelo menos duas coordenadas válidas (Ex: -3.85, -40.92).';
             }
         });
 
         // ====== TRACE ROUTE ======
         async function traceRoute(key, coords) {
             const infoDiv = document.getElementById('info');
-            
+            infoDiv.textContent = 'Calculando rota...';
+
             if (!key) {
                 infoDiv.textContent = 'API Key não encontrada.';
                 return;
             }
 
-            const orsCoords = coords.map(c => [c[1], c[0]]);
+            const orsCoords = coords.map(c => [Number(c[1]), Number(c[0])]);
             const cacheKey = 'route_' + JSON.stringify(orsCoords);
 
             try {
                 const cached = localStorage.getItem(cacheKey);
-                let data;
+                let routeData;
 
                 if (cached) {
                     console.log('Rota carregada do cache');
-                    data = JSON.parse(cached);
+                    const parsedCache = JSON.parse(cached);
+                    routeData = parsedCache.data;
+                    namePoints = parsedCache.names || namePoints; 
+                    drawRoute(routeData, coords);
                 } else {
                     const resp = await fetch(ORS_URL, {
                         method: 'POST',
-                        headers: {
-                            'Authorization': key,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            coordinates: orsCoords,
-                            instructions: false
-                        })
+                        headers: { 'Authorization': key, 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ coordinates: orsCoords, instructions: false })
                     });
 
                     if (!resp.ok) {
                         const err = await resp.text();
                         console.error('Erro ORS:', resp.status, err);
-                        infoDiv.textContent = `Erro ao calcular rota (${resp.status}).`;
+                        infoDiv.textContent = `Erro ao calcular rota (${resp.status}). Verifique as coordenadas.`;
                         return;
                     }
 
-                    data = await resp.json();
+                    routeData = await resp.json();
+                    
+                    const payloadToSave = {
+                        coords: coords,
+                        names: namePoints,
+                        data: routeData
+                    };
+                    
                     try {
-                        localStorage.setItem(cacheKey, JSON.stringify(data));
+                        localStorage.setItem(cacheKey, JSON.stringify(payloadToSave));
                     } catch (e) {
                         console.warn('Não foi possível salvar a rota no cache:', e);
                     }
+                    
+                    drawRoute(routeData, coords);
                 }
-
-                const routeLayer = L.geoJSON(data, {
-                    style: { color: '#2c7be5', weight: 6, opacity: 0.85 }
-                }).addTo(map);
-
-                coords.forEach((c, i) => {
-                    L.marker(c)
-                        .addTo(map)
-                        .bindPopup(`<b>Ponto ${i + 1}</b><br>Lat: ${c[0]}<br>Lng: ${c[1]}`);
-                });
-
-                map.fitBounds(routeLayer.getBounds(), { padding: [30, 30] });
-
-                const summary = data.features[0].properties.summary;
-                const distKm = (summary.distance / 1000).toFixed(2);
-                const durMin = Math.round(summary.duration / 60);
-                infoDiv.innerHTML = `<b>Rota calculada</b><br>Distância: ${distKm} km<br>Duração: ${durMin} min`;
 
             } catch (e) {
                 console.error('Erro na requisição:', e);
                 infoDiv.textContent = 'Erro de conexão com o serviço de rotas.';
             }
+        }
+
+        // ====== DRAW ROUTE ======
+        function drawRoute(data, coordsOriginais) {
+            const infoDiv = document.getElementById('info');
+            
+            if (currentRouteLayer) {
+                map.removeLayer(currentRouteLayer);
+            }
+
+            currentMarkers.forEach(marker => map.removeLayer(marker));
+            currentMarkers = [];
+
+            currentRouteLayer = L.geoJSON(data, {
+                style: { color: '#2c7be5', weight: 6, opacity: 0.85 }
+            }).addTo(map);
+
+            coordsOriginais.forEach((c, i) => {
+                const name = namePoints[i] ? namePoints[i].toUpperCase() : "PONTO " + (i + 1);
+                const marker = L.marker(c)
+                    .addTo(map)
+                    .bindPopup(`<b>PONTO ${i + 1}</b><br><b>${name}</b><br>Lat: ${c[0]}<br>Lng: ${c[1]}`);
+                currentMarkers.push(marker);
+            });
+
+            map.fitBounds(currentRouteLayer.getBounds(), { padding: [30, 30] });
+
+            const summary = data.features[0].properties.summary;
+            const distKm = (summary.distance / 1000).toFixed(2);
+            const durMin = Math.round(summary.duration / 60);
+            infoDiv.innerHTML = `<b>Rota calculada</b><br>Distância: ${distKm} km<br>Duração: ${durMin} min`;
         }
     </script>
 </body>
