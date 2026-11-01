@@ -1,4 +1,3 @@
-
 (function (root, factory) {
     const JData = factory();
 
@@ -22,36 +21,22 @@
 
     function parseScalar(value) {
         const text = value.trim();
-
         if (text === "") return "";
-
-        if (
-            text.startsWith('"') &&
-            text.endsWith('"')
-        ) {
-            try {
-                return JSON.parse(text);
-            } catch {
-                return text.slice(1, -1);
-            }
+        if (text.startsWith('"') && text.endsWith('"')) {
+            try { return JSON.parse(text); } catch { return text.slice(1, -1); }
         }
-
         if (text === "true") return true;
         if (text === "false") return false;
         if (text === "null") return null;
-
         if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(text)) {
-            const number = Number(text);
-            if (Number.isFinite(number)) return number;
+            const n = Number(text);
+            if (Number.isFinite(n)) return n;
         }
-
         return text;
     }
 
     function formatScalar(value) {
         if (typeof value === "string") {
-            // Strings que poderiam ser interpretadas como outros tipos
-            // são serializadas entre aspas.
             if (
                 value === "" ||
                 /^(true|false|null)$/.test(value) ||
@@ -61,21 +46,34 @@
             ) {
                 return JSON.stringify(value);
             }
-
             return value;
         }
-
-        if (
-            value === null ||
-            typeof value === "number" ||
-            typeof value === "boolean"
-        ) {
+        if (value === null || typeof value === "number" || typeof value === "boolean") {
             return String(value);
         }
-
         throw new TypeError("Valor não suportado como escalar.");
     }
 
+    function isScalarLeaf(value) {
+        return (
+            value === null ||
+            typeof value === "number" ||
+            typeof value === "boolean" ||
+            typeof value === "string"
+        );
+    }
+
+    function isLeafArray(array) {
+        return array.every(isScalarLeaf);
+    }
+
+    function isNumericName(name) {
+        return /^\d+$/.test(name);
+    }
+
+    // ---------------------------------------------------------------
+    // PARSE
+    // ---------------------------------------------------------------
     function parse(source) {
         if (typeof source !== "string") {
             throw new TypeError("JData.parse espera uma string.");
@@ -84,7 +82,8 @@
         const lines = source.replace(/^\uFEFF/, "").split(/\r?\n/);
         const result = {};
         const stack = [];
-        let rootName = null;
+        let currentSession = null;
+        let sessionMode = null;
 
         function fail(message, lineNumber) {
             throw new JDataError(message, lineNumber);
@@ -92,130 +91,281 @@
 
         function requireList(level, lineNumber) {
             const entry = stack[level - 1];
-
             if (!entry) {
                 fail(`Não existe lista aberta no nível ${level}.`, lineNumber);
             }
-
             return entry;
+        }
+
+        function ensureSessionMode(mode, lineNumber) {
+            if (sessionMode === null) {
+                sessionMode = mode;
+                result[currentSession] = mode === "object" ? {} : [];
+                return;
+            }
+            if (sessionMode !== mode) {
+                if (sessionMode === "object" && mode === "scalarArray") {
+                    if (!Array.isArray(result[currentSession]["0"])) {
+                        result[currentSession]["0"] = [];
+                    }
+                    return;
+                }
+                fail(
+                    `A sessão "${currentSession}" já foi iniciada como ${sessionMode}; não pode virar ${mode}.`,
+                    lineNumber
+                );
+            }
+        }
+
+        function pushAnonArray(parent, lineNumber) {
+            if (parent.isMultiKey) {
+                const key = String(Object.keys(parent.array).length);
+                parent.array[key] = [];
+                stack.push({
+                    name: key,
+                    array: parent.array[key],
+                    isMultiKey: false,
+                    isAnonArray: true
+                });
+            } else {
+                const anon = [];
+                parent.array.push(anon);
+                stack.push({
+                    name: null,
+                    array: anon,
+                    isMultiKey: false,
+                    isAnonArray: true
+                });
+            }
+        }
+
+        function resolvePending(pending, line, lineNumber) {
+            const isKeyValue = /^\*+[^\s*<>]+\s+/.test(line);
+            const isChildList = /^\*+<[^<>]+>$/.test(line);
+            const isChildAnon = /^\*+<>$/.test(line);
+            const isScalar = /^\*+[^\s*<>]+$/.test(line);
+
+            if (isKeyValue || isChildList || isChildAnon) {
+                pending.holder[pending.name] = {};
+                stack.length = pending.level;
+                stack.push({
+                    name: pending.name,
+                    array: pending.holder[pending.name],
+                    isMultiKey: true
+                });
+            } else if (isScalar) {
+                pending.holder[pending.name] = [];
+                stack.length = pending.level;
+                stack.push({
+                    name: pending.name,
+                    array: pending.holder[pending.name],
+                    isMultiKey: false
+                });
+            } else {
+                fail("Não foi possível determinar o tipo da lista.", lineNumber);
+            }
         }
 
         for (let i = 0; i < lines.length; i++) {
             const lineNumber = i + 1;
             const line = lines[i].trim();
-
             if (!line || line.startsWith("#")) continue;
 
-            // Objeto raiz: [Usuário]
-            const rootMatch = line.match(/^\[([^\]]+)\]$/);
-
-            if (rootMatch) {
-                if (rootName !== null) {
-                    fail("Já existe um objeto raiz declarado.", lineNumber);
+            // Sessão: [Nome]
+            const sessionMatch = line.match(/^\[([^\]]+)\]$/);
+            if (sessionMatch) {
+                const name = sessionMatch[1].trim();
+                if (!name) fail("O nome da sessão não pode ser vazio.", lineNumber);
+                if (Object.prototype.hasOwnProperty.call(result, name)) {
+                    fail(`A sessão "${name}" já foi declarada.`, lineNumber);
                 }
-
-                rootName = rootMatch[1].trim();
-
-                if (!rootName) {
-                    fail("O nome do objeto raiz não pode ser vazio.", lineNumber);
-                }
-
+                currentSession = name;
+                sessionMode = null;
+                result[name] = null;
                 stack.length = 0;
                 continue;
             }
 
-            if (rootName === null) {
-                fail("Declare o objeto raiz usando [Nome].", lineNumber);
+            if (currentSession === null) {
+                fail("Declare uma sessão usando [Nome].", lineNumber);
             }
 
-            // Propriedade do objeto raiz: $nome valor
+            // Lista anônima na sessão: <>
+            if (line === "<>") {
+                if (sessionMode === null) {
+                    sessionMode = "nestedArray";
+                    result[currentSession] = [];
+                }
+                if (sessionMode !== "nestedArray") {
+                    fail(
+                        `A sessão "${currentSession}" não é uma lista de listas.`,
+                        lineNumber
+                    );
+                }
+                const anon = [];
+                result[currentSession].push(anon);
+                stack.length = 0;
+                stack.push({
+                    name: null,
+                    array: anon,
+                    isMultiKey: false,
+                    isAnonArray: true
+                });
+                continue;
+            }
+
+            // Propriedade: $chave valor
             if (line.startsWith("$")) {
                 const match = line.match(/^\$([^\s]+)(?:\s+([\s\S]*))?$/);
+                if (!match) fail("Linha $ inválida.", lineNumber);
 
-                if (!match) {
-                    fail("Propriedade inválida.", lineNumber);
-                }
-
-                const key = match[1];
-                const rawValue = match[2] ?? "";
-
-                result[key] = parseScalar(rawValue);
+                ensureSessionMode("object", lineNumber);
+                result[currentSession][match[1]] = parseScalar(match[2] ?? "");
                 stack.length = 0;
                 continue;
             }
 
-            // Lista principal: <endereços>
+            // Lista nomeada no topo da sessão: <nome>
             const rootListMatch = line.match(/^<([^<>]+)>$/);
-
             if (rootListMatch) {
                 const name = rootListMatch[1].trim();
+                if (!name) fail("O nome da lista não pode ser vazio.", lineNumber);
 
-                if (!name) {
-                    fail("O nome da lista não pode ser vazio.", lineNumber);
+                if (isNumericName(name)) {
+                    // <N> na sessão → array anônimo: sessão precisa ser array
+                    if (sessionMode === null) {
+                        sessionMode = "nestedArray";
+                        result[currentSession] = [];
+                    }
+                    if (!Array.isArray(result[currentSession])) {
+                        fail(
+                            `A sessão "${currentSession}" já foi iniciada como objeto; não pode conter <${name}> anônimo.`,
+                            lineNumber
+                        );
+                    }
+                    const anon = [];
+                    result[currentSession].push(anon);
+                    stack.length = 0;
+                    stack.push({
+                        name: null,
+                        array: anon,
+                        isMultiKey: false,
+                        isAnonArray: true
+                    });
+                    continue;
                 }
 
-                result[name] = [];
+                // nome não numérico → lista nomeada (objeto)
+                ensureSessionMode("object", lineNumber);
+                result[currentSession][name] = null;
                 stack.length = 0;
-                stack.push({ name, array: result[name] });
+                stack.push({
+                    name,
+                    array: null,
+                    isMultiKey: false,
+                    pending: true,
+                    holder: result[currentSession],
+                    level: 0
+                });
                 continue;
             }
 
-            // Elementos e listas filhas: *, **, ***, etc.
+            // Elementos e listas filhas
             const itemMatch = line.match(/^(\*+)(.*)$/);
-
             if (!itemMatch) {
                 fail("Sintaxe inválida. Use $, <lista> ou *elemento.", lineNumber);
             }
 
             const level = itemMatch[1].length;
             const content = itemMatch[2].trim();
+            if (!content) fail("Elemento vazio não é permitido.", lineNumber);
 
-            if (!content) {
-                fail("Elemento vazio não é permitido.", lineNumber);
+            if (stack.length > 0 && stack[stack.length - 1].pending) {
+                const top = stack[stack.length - 1];
+                if (top.level + 1 === level) {
+                    resolvePending(top, line, lineNumber);
+                }
             }
 
-            // Uma lista filha, por exemplo: *<alternativos>
-            const childListMatch = content.match(/^<([^<>]+)>$/);
-
-            if (childListMatch) {
+            const childMatch = content.match(/^<([^<>]*)>$/);
+            if (childMatch) {
                 const parent = requireList(level, lineNumber);
-                const childName = childListMatch[1].trim();
-
-                if (!childName) {
-                    fail("O nome da lista filha não pode ser vazio.", lineNumber);
-                }
-
-                // Fecha os níveis mais profundos antes de abrir outro.
+                const childName = childMatch[1].trim();
                 stack.length = level;
 
-                const childObject = { [childName]: [] };
-                parent.array.push(childObject);
+                if (!childName) {
+                    pushAnonArray(parent, lineNumber);
+                } else if (isNumericName(childName) && !parent.isMultiKey) {
+                    const anon = [];
+                    parent.array.push(anon);
+                    stack.push({
+                        name: null,
+                        array: anon,
+                        isMultiKey: false,
+                        isAnonArray: true
+                    });
+                } else if (isNumericName(childName) && parent.isMultiKey) {
+                    parent.array[childName] = [];
+                    stack.push({
+                        name: childName,
+                        array: parent.array[childName],
+                        isMultiKey: false
+                    });
+                } else {
+                    if (parent.isMultiKey) {
+                        parent.array[childName] = null;
+                        stack.push({
+                            name: childName,
+                            array: null,
+                            isMultiKey: false,
+                            pending: true,
+                            holder: parent.array,
+                            level
+                        });
+                    } else {
+                        const childObject = { [childName]: null };
+                        parent.array.push(childObject);
+                        stack.push({
+                            name: childName,
+                            array: null,
+                            isMultiKey: false,
+                            pending: true,
+                            holder: childObject,
+                            level
+                        });
+                    }
+                }
+                continue;
+            }
 
-                stack.push({
-                    name: childName,
-                    array: childObject[childName]
-                });
-
+            // Sem lista aberta: *solto
+            if (stack.length === 0) {
+                if (sessionMode === "object") {
+                    if (!Array.isArray(result[currentSession]["0"])) {
+                        result[currentSession]["0"] = [];
+                    }
+                    result[currentSession]["0"].push(parseScalar(content));
+                } else {
+                    ensureSessionMode("scalarArray", lineNumber);
+                    result[currentSession].push(parseScalar(content));
+                }
                 continue;
             }
 
             const currentList = requireList(level, lineNumber);
-
-            // Reduzir o número de asteriscos fecha os níveis internos.
             stack.length = level;
 
-            // Elemento no formato *chave valor.
-            // Se não houver separação, é tratado como escalar.
             const propertyMatch = content.match(/^([^\s]+)(?:\s+([\s\S]*))?$/);
-
-            if (!propertyMatch) {
-                fail("Elemento inválido.", lineNumber);
-            }
+            if (!propertyMatch) fail("Elemento inválido.", lineNumber);
 
             const key = propertyMatch[1];
             const hasValue = propertyMatch[2] !== undefined;
 
-            if (!hasValue) {
+            if (currentList.isMultiKey) {
+                currentList.array[key] = hasValue
+                    ? parseScalar(propertyMatch[2])
+                    : null;
+            } else if (!hasValue) {
                 currentList.array.push(parseScalar(key));
             } else {
                 currentList.array.push({
@@ -224,13 +374,20 @@
             }
         }
 
-        if (rootName === null) {
-            throw new JDataError("Nenhum objeto raiz foi declarado.");
+        if (currentSession === null) {
+            throw new JDataError("Nenhuma sessão foi declarada.");
         }
 
-        return { [rootName]: result };
+        for (const k of Object.keys(result)) {
+            if (result[k] === null) result[k] = {};
+        }
+
+        return result;
     }
 
+    // ---------------------------------------------------------------
+    // STRINGIFY
+    // ---------------------------------------------------------------
     function stringify(input, options = {}) {
         if (
             input === null ||
@@ -241,106 +398,35 @@
         }
 
         const keys = Object.keys(input);
-
-        if (keys.length !== 1) {
-            throw new TypeError(
-                "O objeto raiz deve conter apenas uma propriedade, como { Usuário: {...} }."
-            );
-        }
-
-        const rootName = keys[0];
-        const data = input[rootName];
-
-        if (
-            data === null ||
-            typeof data !== "object" ||
-            Array.isArray(data)
-        ) {
-            throw new TypeError("O conteúdo do objeto raiz deve ser um objeto.");
+        if (keys.length === 0) {
+            throw new TypeError("O objeto raiz está vazio.");
         }
 
         const lines = [];
-        const indent = options.indentComments !== false;
 
-        lines.push(`[${rootName}]`);
-
-        function writeScalar(key, value) {
-            if (value !== null && typeof value === "object") {
-                throw new TypeError(
-                    `A propriedade "${key}" não é escalar. Objetos devem ser representados por listas.`
-                );
-            }
-
+        function writeScalarProperty(key, value) {
             lines.push(`$${key} ${formatScalar(value)}`);
         }
 
-        function writeList(name, array, level) {
-            if (!Array.isArray(array)) {
-                throw new TypeError(`"${name}" deve ser uma lista.`);
-            }
-
-            if (level === 1) {
-                lines.push(`<${name}>`);
-            } else {
-                lines.push(`${"*".repeat(level - 1)}<${name}>`);
-            }
-
-            for (const item of array) {
-                const stars = "*".repeat(level);
-
-                if (item !== null && typeof item === "object") {
-                    if (Array.isArray(item)) {
-                        throw new TypeError(
-                            "Listas aninhadas precisam ter um nome de propriedade."
-                        );
-                    }
-
-                    const itemKeys = Object.keys(item);
-
-                    if (itemKeys.length !== 1) {
-                        throw new TypeError(
-                            "Cada elemento de lista deve ter exatamente uma propriedade."
-                        );
-                    }
-
-                    const key = itemKeys[0];
-                    const value = item[key];
-
-                    if (Array.isArray(value)) {
-                        lines.push(`${stars}<${key}>`);
-                        writeListContents(value, level + 1);
-                    } else if (value !== null && typeof value === "object") {
-                        throw new TypeError(
-                            `O elemento "${key}" contém um objeto não suportado.`
-                        );
-                    } else {
-                        lines.push(`${stars}${key} ${formatScalar(value)}`);
-                    }
-                } else {
-                    lines.push(`${stars}${formatScalar(item)}`);
-                }
-            }
-        }
-
         function writeListContents(array, level) {
-            for (const item of array) {
+            for (let idx = 0; idx < array.length; idx++) {
+                const item = array[idx];
                 const stars = "*".repeat(level);
 
-                if (item !== null && typeof item === "object") {
-                    if (Array.isArray(item)) {
-                        throw new TypeError(
-                            "Listas aninhadas precisam ter um nome de propriedade."
-                        );
-                    }
+                if (isScalarLeaf(item)) {
+                    lines.push(`${stars}${formatScalar(item)}`);
+                    continue;
+                }
 
-                    const itemKeys = Object.keys(item);
+                if (Array.isArray(item)) {
+                    lines.push(`${"*".repeat(level - 1)}<${idx}>`);
+                    writeListContents(item, level);
+                    continue;
+                }
 
-                    if (itemKeys.length !== 1) {
-                        throw new TypeError(
-                            "Cada elemento de lista deve ter exatamente uma propriedade."
-                        );
-                    }
+                const itemKeys = Object.keys(item);
 
+                if (itemKeys.length === 1) {
                     const key = itemKeys[0];
                     const value = item[key];
 
@@ -348,34 +434,106 @@
                         lines.push(`${stars}<${key}>`);
                         writeListContents(value, level + 1);
                     } else if (value !== null && typeof value === "object") {
-                        throw new TypeError(
-                            `O elemento "${key}" contém um objeto não suportado.`
-                        );
+                        lines.push(`${stars}<${key}>`);
+                        writeObjectAsMultiKey(value, level + 1);
                     } else {
                         lines.push(`${stars}${key} ${formatScalar(value)}`);
                     }
                 } else {
-                    lines.push(`${stars}${formatScalar(item)}`);
+                    lines.push(`${stars}<>`);
+                    writeObjectAsMultiKey(item, level + 1);
                 }
             }
         }
 
-        for (const key of Object.keys(data)) {
-            const value = data[key];
+        function writeObjectAsMultiKey(obj, level) {
+            const stars = "*".repeat(level);
+            for (const key of Object.keys(obj)) {
+                const value = obj[key];
 
-            if (Array.isArray(value)) {
-                writeList(key, value, 1);
-            } else {
-                writeScalar(key, value);
+                if (Array.isArray(value)) {
+                    lines.push(`${stars}<${key}>`);
+                    writeListContents(value, level + 1);
+                } else if (value !== null && typeof value === "object") {
+                    lines.push(`${stars}<${key}>`);
+                    writeObjectAsMultiKey(value, level + 1);
+                } else {
+                    lines.push(`${stars}${key} ${formatScalar(value)}`);
+                }
             }
+        }
+
+        function writeSession(name, data) {
+            lines.push(`[${name}]`);
+
+            if (Array.isArray(data)) {
+                if (isLeafArray(data)) {
+                    for (const v of data) {
+                        lines.push(`*${formatScalar(v)}`);
+                    }
+                } else {
+                    for (let idx = 0; idx < data.length; idx++) {
+                        const item = data[idx];
+                        if (isScalarLeaf(item)) {
+                            lines.push(`*${formatScalar(item)}`);
+                        } else if (Array.isArray(item)) {
+                            lines.push(`<${idx}>`);
+                            writeListContents(item, 1);
+                        } else {
+                            const itemKeys = Object.keys(item);
+                            if (itemKeys.length === 1) {
+                                const key = itemKeys[0];
+                                const value = item[key];
+                                if (Array.isArray(value)) {
+                                    lines.push(`<${key}>`);
+                                    writeListContents(value, 1);
+                                } else {
+                                    lines.push("<>");
+                                    writeObjectAsMultiKey(item, 1);
+                                }
+                            } else {
+                                lines.push("<>");
+                                writeObjectAsMultiKey(item, 1);
+                            }
+                        }
+                    }
+                }
+                lines.push("");
+                return;
+            }
+
+            if (data === null || typeof data !== "object") {
+                throw new TypeError(
+                    `A sessão "${name}" deve ser um objeto ou array.`
+                );
+            }
+
+            for (const key of Object.keys(data)) {
+                const value = data[key];
+
+                if (Array.isArray(value)) {
+                    lines.push(`<${key}>`);
+                    writeListContents(value, 1);
+                } else if (value !== null && typeof value === "object") {
+                    lines.push(`<${key}>`);
+                    writeObjectAsMultiKey(value, 1);
+                } else {
+                    writeScalarProperty(key, value);
+                }
+            }
+            lines.push("");
+        }
+
+        for (const name of keys) {
+            writeSession(name, input[name]);
+        }
+
+        while (lines.length && lines[lines.length - 1] === "") {
+            lines.pop();
         }
 
         return lines.join("\n");
     }
 
-    return {
-        parse,
-        stringify,
-        JDataError
-    };
+    return { parse, stringify, JDataError };
 });
