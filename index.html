@@ -422,7 +422,7 @@
                 let inputVal = document.getElementById("coord"+i).value;
                 const inputName = document.getElementById("name"+i).value;
                 
-                inputVal = inputVal.replace(/(\d),(\d)/g, "$1.$2").replace(/[{"lat":"lng":}]/g, "");
+                inputVal = inputVal.replace(/(\d),(\d)/g, "$1.$2").replace(/[{"lat":"lng":}[\]()]/g, "");
 
                 if (inputVal.trim() !== "") {
                     let arryCurrentCoords = inputVal.split(",").map(c => Number(c.trim()));
