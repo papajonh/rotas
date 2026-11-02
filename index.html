@@ -445,7 +445,7 @@
                 const jsonData = JSON.parse(currentRouteToDownload);
                 const dataToDownload = JData.stringify(jsonData);
 
-                const blob = new Blob([dataToDownload], { type: 'application/json' });
+                const blob = new Blob([dataToDownload], { type: 'application/jdata' });
                 const url = URL.createObjectURL(blob);
 
                 const link = document.createElement('a');
