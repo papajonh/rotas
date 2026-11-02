@@ -419,8 +419,11 @@
             namePoints = []; 
             
             for(let i=0; i <= count; i++){
-                const inputVal = document.getElementById("coord"+i).value;
+                let inputVal = document.getElementById("coord"+i).value;
                 const inputName = document.getElementById("name"+i).value;
+                
+                inputVal = inputVal.replace(/(\d),(\d)/g, "$1.$2").replaceAll(/[{}]/g, "");
+
                 if (inputVal.trim() !== "") {
                     let arryCurrentCoords = inputVal.split(",").map(c => Number(c.trim()));
                     if (arryCurrentCoords.length === 2 && !isNaN(arryCurrentCoords[0]) && !isNaN(arryCurrentCoords[1])) {
