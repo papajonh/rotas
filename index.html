@@ -234,8 +234,22 @@
             0%   { transform: scale(0.6); opacity: 1; }
             100% { transform: scale(1.8); opacity: 0; }
         }
+      .gps-btn.single-active {
+    background: #2c7be5;          
+    }
 
-        @media (max-width: 520px) {
+    .gps-btn.loop-active {
+        background: #e63946;          
+        animation: gps-loop-pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes gps-loop-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(230, 57, 70, 0.6); }
+        50%      { box-shadow: 0 0 0 10px rgba(230, 57, 70, 0); }
+    }
+
+
+    @media (max-width: 520px) {
             .way-points{
             padding: 5px;
             margin-left: 5px;
@@ -246,7 +260,7 @@
             align-items: center;
             text-align: center;
         }
-        }
+    }
     </style>
 </head>
 <body>
@@ -626,94 +640,231 @@
             };
             reader.readAsText(file);
         });
-
-        // ====== CURRENT POSITION ======
+        
+        
+        // ====== GPS: VEHICLE — 3s · 1 reading · movement filter ======
         let currentLocationMarker = null;
         let currentLocationCircle = null;
+        let lastDrawnPosition = null;     
+
+        let gpsIntervalId = null;
+        let gpsLoopActive = false;
+        let isFetching = false;
+        let singleShotActive = false;
+        let clickTimer = null;
+        const DOUBLE_CLICK_DELAY = 300;
+
+        // --- Vehicle parameters ---
+        const GPS_INTERVAL_MS = 3500;      // 3.5s (fluid while moving)
+        const READ_TIMEOUT_MS = 3000;      // timeout per reading
+        const TARGET_ACCURACY_M = 15;      // realistic target while moving
+        const MIN_MOVE_METERS = 5;         // ignore noise when stopped
 
         const gpsBtn = document.getElementById('gps-btn');
 
+        // ---------- HELPERS ----------
         function setGpsLoading(isLoading) {
             if (isLoading) gpsBtn.classList.add('loading');
             else gpsBtn.classList.remove('loading');
         }
 
-        function getCurrentPosition() {
+        function setGpsVisualState(state) {
+            gpsBtn.classList.remove('active', 'loop-active', 'single-active');
+            if (state === 'loop') {
+                gpsBtn.classList.add('active', 'loop-active');
+                gpsBtn.textContent = '🔄';
+                gpsBtn.title = 'Loop active (3s) — double-click to stop';
+            } else if (state === 'single') {
+                gpsBtn.classList.add('single-active');
+                gpsBtn.textContent = '📍';
+                gpsBtn.title = 'Single location';
+            } else if (state === 'loading') {
+                gpsBtn.classList.add('loading');
+                gpsBtn.textContent = '⏳';
+            } else {
+                gpsBtn.textContent = '📍';
+                gpsBtn.title = '1 click: single | 2 clicks: 3s loop';
+            }
+        }
+
+        function distanceMeters(lat1, lon1, lat2, lon2) {
+            const R = 6371000;
+            const toRad = d => d * Math.PI / 180;
+            const dLat = toRad(lat2 - lat1);
+            const dLon = toRad(lon2 - lon1);
+            const a = Math.sin(dLat / 2) ** 2 +
+                    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+                    Math.sin(dLon / 2) ** 2;
+            return 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+
+        // ---------- SINGLE READING ----------
+        function getCurrentPosition(options = {}) {
             return new Promise((resolve, reject) => {
                 if (!('geolocation' in navigator)) {
-                    reject(new Error('Geolocalização não suportada neste navegador.'));
+                    reject(new Error('Localização não suportada.'));
                     return;
                 }
                 navigator.geolocation.getCurrentPosition(resolve, reject, {
                     enableHighAccuracy: true,
-                    timeout: 15000,
-                    maximumAge: 0
+                    timeout: READ_TIMEOUT_MS,
+                    maximumAge: 0,
+                    ...options
                 });
             });
         }
 
+        // ---------- DRAWING ----------
         function drawCurrentLocation(lat, lng, accuracy) {
             if (currentLocationMarker) map.removeLayer(currentLocationMarker);
             if (currentLocationCircle) map.removeLayer(currentLocationCircle);
 
+            let color = '#e63946';
+            if (accuracy <= TARGET_ACCURACY_M) color = '#2ecc71';
+            else if (accuracy <= 30) color = '#f39c12';
+
             currentLocationCircle = L.circle([lat, lng], {
-                radius: accuracy,
-                color: '#2c7be5',
-                fillColor: '#2c7be5',
-                fillOpacity: 0.15,
-                weight: 1
+                radius: accuracy, color, fillColor: color,
+                fillOpacity: 0.15, weight: 1
             }).addTo(map);
 
             const icon = L.divIcon({
                 className: 'current-location-marker',
-                html: '<div class="current-location-dot"></div>',
-                iconSize: [20, 20],
-                iconAnchor: [10, 10]
+                html: `<div class="current-location-dot" style="background:${color}"></div>`,
+                iconSize: [20, 20], iconAnchor: [10, 10]
             });
 
             currentLocationMarker = L.marker([lat, lng], { icon })
                 .addTo(map)
-                .bindPopup(`<b>Sua localização</b><br>Lat: ${lat.toFixed(6)}<br>Lng: ${lng.toFixed(6)}<br>Precisão: ±${Math.round(accuracy)} m`)
-                .openPopup();
-
-            map.setView([lat, lng], Math.max(map.getZoom(), 16));
+                .bindPopup(`<b>MINHA LOCALIZAÇÃO</b><br>
+                    Lat: ${lat.toFixed(6)}<br>
+                    Lng: ${lng.toFixed(6)}<br>
+                    Precisão: ±${Math.round(accuracy)} m`);
         }
 
-        gpsBtn.addEventListener('click', async () => {
-            const infoDiv = document.getElementById('info');
-            setGpsLoading(true);
-            infoDiv.textContent = 'Obtendo localização GPS...';
+        // ---------- ONE UPDATE ----------
+        async function updateOnce(showPopup = false) {
+            if (isFetching) return;
+            isFetching = true;
 
             try {
                 const position = await getCurrentPosition();
-                const { latitude, longitude, accuracy } = position.coords;
+                const { latitude, longitude, accuracy, speed, heading } = position.coords;
 
-                drawCurrentLocation(latitude, longitude, accuracy);
-
-                const coordInput = document.getElementById('coord0');
-                coordInput.value = `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
-
-                const nameInput = document.getElementById('name0');
-                if (!nameInput.value || nameInput.value.trim() === '') {
-                    nameInput.value = 'MINHA LOCALIZAÇÃO';
+                // Filter: only redraw if moved enough
+                let moved = true;
+                if (lastDrawnPosition) {
+                    const d = distanceMeters(
+                        lastDrawnPosition.lat, lastDrawnPosition.lng,
+                        latitude, longitude
+                    );
+                    if (d < MIN_MOVE_METERS && accuracy >= lastDrawnPosition.accuracy) {
+                        moved = false;
+                    }
                 }
 
-                infoDiv.innerHTML = `<b>Localização obtida!</b><br>Lat: ${latitude.toFixed(6)}<br>Lng: ${longitude.toFixed(6)}<br>Precisão: ±${Math.round(accuracy)} m`;
+                if (moved) {
+                    lastDrawnPosition = { lat: latitude, lng: longitude, accuracy };
+                    drawCurrentLocation(latitude, longitude, accuracy);
+                    if (showPopup && currentLocationMarker) currentLocationMarker.openPopup();
+
+                    // Follow vehicle (only if outside viewport)
+                    if (!map.getBounds().contains([latitude, longitude])) {
+                        map.setView([latitude, longitude], Math.max(map.getZoom(), 16));
+                    }
+
+                    // Fill coord0
+                    const coordInput = document.getElementById('coord0');
+                    if (coordInput) coordInput.value = `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
+
+                    const nameInput = document.getElementById('name0');
+                    if (nameInput && (!nameInput.value || nameInput.value.trim() === '')) {
+                        nameInput.value = 'MINHA LOCALIZAÇÃO';
+                    }
+                }
+
+                // Info panel
+                let status = '❌ Poor';
+                if (accuracy <= TARGET_ACCURACY_M) status = '✅ Good (<15m)';
+                else if (accuracy <= 30) status = '🟡 Medio (15-30m)';
+                else if (accuracy <= 50) status = '🟠 Ruim (30-50m)';
+
+                const speedKmh = speed != null && !isNaN(speed) ? (speed * 3.6).toFixed(1) + ' km/h' : '—';
+                const mode = gpsLoopActive ? '🔄 LOOP (3s)' : '📍 UNICO';
+
+                document.getElementById('info').innerHTML = `<b>${mode}</b> — ${status}<br>
+                    Lat: ${latitude.toFixed(6)}<br>
+                    Lng: ${longitude.toFixed(6)}<br>
+                    Precisão: ±${accuracy.toFixed(1)} m<br>
+                    Velocidade: ${speedKmh}`;
             } catch (err) {
                 let msg = 'Erro ao obter localização.';
                 switch (err.code) {
-                    case 1: msg = 'Permissão de localização negada. Autorize o acesso ao GPS.'; break;
-                    case 2: msg = 'Localização indisponível. Verifique o GPS.'; break;
-                    case 3: msg = 'Tempo esgotado ao obter localização.'; break;
+                    case 1: msg = 'Permissão negada. Authorize o  GPS.'; break;
+                    case 2: msg = 'Localização dispoinivel.'; break;
+                    case 3: msg = 'GPS timeout.'; break;
                     default: msg = err.message || msg;
                 }
-                infoDiv.textContent = msg;
-                console.error('Erro GPS:', err);
+                document.getElementById('info').textContent = msg;
+                if (err.code === 1 && gpsLoopActive) stopGpsLoop();
             } finally {
+                isFetching = false;
                 setGpsLoading(false);
+                if (!gpsLoopActive && !singleShotActive) setGpsVisualState('off');
+                else if (gpsLoopActive) setGpsVisualState('loop');
+            }
+        }
+
+        // ---------- SINGLE SHOT ----------
+        async function doSingleShot() {
+            if (gpsLoopActive) return;
+            singleShotActive = true;
+            setGpsLoading(true);
+            setGpsVisualState('loading');
+            document.getElementById('info').textContent = 'Localização unica...';
+            await updateOnce(true);
+            singleShotActive = false;
+            if (!gpsLoopActive) setGpsVisualState('off');
+        }
+
+        // ---------- LOOP ----------
+        function startGpsLoop() {
+            if (gpsLoopActive) return;
+            gpsLoopActive = true;
+            lastDrawnPosition = null;      // reset filter on start
+            setGpsVisualState('loop');
+            document.getElementById('info').textContent = 'GPS loop ativo (3s)...';
+            updateOnce(false);
+            gpsIntervalId = setInterval(() => updateOnce(false), GPS_INTERVAL_MS);
+        }
+
+        function stopGpsLoop() {
+            if (gpsIntervalId !== null) {
+                clearInterval(gpsIntervalId);
+                gpsIntervalId = null;
+            }
+            gpsLoopActive = false;
+            setGpsVisualState('off');
+            document.getElementById('info').textContent = 'GPS loop parado.';
+        }
+
+        // ---------- CLICK DETECTION ----------
+        gpsBtn.addEventListener('click', () => {
+            if (clickTimer !== null) {
+                clearTimeout(clickTimer);
+                clickTimer = null;
+                if (gpsLoopActive) stopGpsLoop();
+                else startGpsLoop();
+            } else {
+                clickTimer = setTimeout(() => {
+                    clickTimer = null;
+                    doSingleShot();
+                }, DOUBLE_CLICK_DELAY);
             }
         });
 
+        setGpsVisualState('off');
+            
         // ====== TRACE ROUTE ======
         async function traceRoute(key, coords) {
             const infoDiv = document.getElementById('info');
