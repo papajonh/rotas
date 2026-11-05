@@ -114,9 +114,5 @@ Construída com **Leaflet + OpenRouteService + Leaflet.offline**, funciona como 
 | `baseLayer` | Camada base escolhida (`osm`/`terrain`/`satellite`) |
 | `route_<coords>` | Rota cacheada: `{ coords, names, data }` |
 
-### Estado do GPS
-```javascript
-let watchId = null;          // ID do watchPosition (null = inativo)
-let gpsLoopActive = false;   // intenção do usuário (loop ativo?)
-let lastDrawnPosition = null;// última posição desenhada (filtro de movimento)
+
 
