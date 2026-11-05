@@ -10,6 +10,7 @@ const ORS_URL = 'https://api.heigit.org/openrouteservice/v2/directions/driving-c
 
 let startCoord = [];
 let zoomIn = 6;
+let map = null;
 
 // ====== LOAD CONFIG ======
 (async function () {
@@ -55,7 +56,7 @@ function initMap() {
     const initialLayer = layers[savedLayer] || osmLayer;
 
     // ====== INIT MAP ======
-    const map = L.map('map', { center: startCoord, zoom: zoomIn, layers: [initialLayer] });
+    map = L.map('map', { center: startCoord, zoom: zoomIn, layers: [initialLayer] });
     document.getElementById('info').textContent = 'Insira a rota...';
 
     // ====== FULLSCREEN CONTROL ======
