@@ -32,6 +32,16 @@ let map = null;
     }
 })();
 
+// ====== CUSTOM ICON ======
+const customIcon = L.icon({
+    iconUrl: 'image/map/marker-icon.png',
+    shadowUrl: 'image/map/marker-shadow.png',
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowSize: [41, 41]
+});
+
 // ====== INIT MAP ======
 function initMap() {
 
@@ -91,7 +101,7 @@ function initMap() {
             btn.title = 'Rotas Salvas';
 
             const panel = L.DomUtil.create('div', 'history-panel');
-            document.body.appendChild(panel);
+            document.getElementById("map").appendChild(panel);
 
             L.DomEvent.on(btn, 'click', function (e) {
                 L.DomEvent.stopPropagation(e);

@@ -83,7 +83,7 @@ function drawRoute(data, coordsOriginais) {
 
     coordsOriginais.forEach((c, i) => {
         const name = namePoints[i] ? namePoints[i].toUpperCase() : "PONTO " + (i + 1);
-        const marker = L.marker(c)
+        const marker = L.marker(c, { icon: customIcon })
             .addTo(map)
             .bindPopup(`<b>PONTO ${i + 1}</b><br><b>${name}</b><br>Lat: ${c[0]}<br>Lng: ${c[1]}`);
         currentMarkers.push(marker);

@@ -1,5 +1,8 @@
 # Apikey OpenRouteService
 
+# $coordLat/$coordLng initial
+# $key Apikey OpenRouteService
+
 [Conf]
 $coordLat -3.8575446
 $coordLng -40.9250892
