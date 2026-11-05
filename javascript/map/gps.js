@@ -102,7 +102,8 @@ function drawCurrentLocation(lat, lng, accuracy) {
 }
 
 // ---------- PROCESS POSITION (compartilhado entre single e watch) ----------
-function processPosition(position, showPopup = false) {
+function processPosition(position, options = {}) {
+    const { showPopup = false, center = false } = options;
     const { latitude, longitude, accuracy, speed } = position.coords;
 
     // Filter: only redraw if moved enough
@@ -122,10 +123,8 @@ function processPosition(position, showPopup = false) {
         drawCurrentLocation(latitude, longitude, accuracy);
         if (showPopup && currentLocationMarker) currentLocationMarker.openPopup();
 
-        // Suave em vez de brusco
-        if (!map.getBounds().contains([latitude, longitude])) {
-            map.panTo([latitude, longitude], { animate: true, duration: 0.5 });
-        }
+        // Centraliza: força se pedido, senão só se saiu do viewport
+        centerOnPosition(latitude, longitude, center);
 
         const coordInput = document.getElementById('coord0');
         if (coordInput) coordInput.value = `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
@@ -152,6 +151,16 @@ function processPosition(position, showPopup = false) {
         Velocidade: ${speedKmh}`;
 }
 
+function centerOnPosition(lat, lng, force = false) {
+    if (force) {
+        map.setView([lat, lng], Math.max(map.getZoom(), 16), { animate: true });
+    } else {
+        if (!map.getBounds().contains([lat, lng])) {
+            map.panTo([lat, lng], { animate: true, duration: 0.5 });
+        }
+    }
+}
+
 function handleGpsError(err) {
     let msg = 'Erro ao obter localização.';
     switch (err.code) {
@@ -176,7 +185,7 @@ async function doSingleShot() {
 
     try {
         const position = await getCurrentPosition();
-        processPosition(position, true);
+        processPosition(position, { showPopup: true, center: true });
     } catch (err) {
         handleGpsError(err);
     } finally {
@@ -188,22 +197,26 @@ async function doSingleShot() {
 
 // ---------- WATCH POSITION (2 cliques ativa, 2 cliques desativa) ----------
 function startGpsWatch() {
-    if (watchId !== null) return;   // já está ativo
+    if (watchId !== null) return;
 
     gpsLoopActive = true;
     lastDrawnPosition = null;
     setGpsVisualState('loop');
     document.getElementById('info').textContent = 'Ativando rastreamento GPS...';
 
+    let firstWatchFix = true;
+
     watchId = navigator.geolocation.watchPosition(
         (position) => {
             setGpsLoading(false);
-            processPosition(position, false);
+            processPosition(position, {
+                showPopup: firstWatchFix,
+                center: firstWatchFix
+            });
+            firstWatchFix = false;
         },
         (err) => {
             setGpsLoading(false);
-            // Timeout do watchPosition é "normal" em veículo (o watch se recupera sozinho).
-            // Só mostra erro real; timeout silencioso para não piscar a tela.
             if (err.code !== 3) handleGpsError(err);
         },
         {
