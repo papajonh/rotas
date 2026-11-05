@@ -1,7 +1,7 @@
 # rotas
 Projeto de calcaular rotas com lib opensource ou gratuitas.
 
-versão 1.1
+versão 1.2
 
 Modo de operação:
 * Traçar rota
