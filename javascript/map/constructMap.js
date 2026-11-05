@@ -56,7 +56,7 @@ function initMap() {
     );
     const satelliteLayer = L.tileLayer.offline(
         'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        { attribution: 'Tiles © Esri', maxZoom: 19, crossOrigin: true, maxNativeZoom: 16 }
+        { attribution: 'Tiles © Esri', maxZoom: 18, crossOrigin: true, maxNativeZoom: 17 }
     );
 
     const layers = { osm: osmLayer, terrain: terrainLayer, satellite: satelliteLayer };
